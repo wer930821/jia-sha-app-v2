@@ -1,0 +1,7 @@
+{
+  "name": "jia-sha-app",
+  "version": "1.3.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.x" }
+}
