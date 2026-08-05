@@ -12,3 +12,8 @@
 - 選取結果後只更新地圖標記，不再重新 fit 全部地圖造成畫面抖動。
 
 Commit：`Fix restaurant location and result card jumping`
+
+
+## v26
+- 早餐在選定範圍沒有結果時，自動擴大到 0.5 公里，再擴到 1 公里。
+- 畫面會清楚顯示實際採用的搜尋距離。

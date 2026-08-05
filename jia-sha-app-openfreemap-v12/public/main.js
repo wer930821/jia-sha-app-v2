@@ -345,10 +345,58 @@ function render(){
 
 async function searchAtPosition(){
   if(!state.position)return useLocation();
-  state.loading=true;els.locationButton.disabled=true;els.locationButton.textContent='搜尋中…';els.locationText.textContent=`搜尋 ${state.maxDistanceKm} 公里內店家`;
-  try{const result=await fetchOsmRestaurants(state.position.lat,state.position.lon,state.maxDistanceKm);state.restaurants=result.restaurants;state.searchStats=result.stats;state.lastFetchedRadiusKm=state.maxDistanceKm;state.isLive=true;state.selectedId=null;if(result.restaurants.length){els.locationText.textContent=`${state.category}：找到 ${result.restaurants.length} 間候選`;hideNotice();}else{els.locationText.textContent=`${state.category}：目前沒有找到符合店家`;showNotice(`已成功搜尋附近資料，但 ${state.maxDistanceKm} 公里內沒有找到明確標示為「${state.category}」的店家。可以增加距離後再搜尋。`);}}
-  catch(e){state.restaurants=[];state.searchStats={rawCount:0,returnedCount:0,normalizedCount:0,successfulTiles:0,totalTiles:0};state.isLive=false;state.selectedId=null;els.locationText.textContent='真實店家搜尋失敗';showNotice(`${e.message}。沒有使用示範店家，請稍後重新搜尋。`);}
-  finally{state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='重新搜尋';render();}
+  state.loading=true;
+  els.locationButton.disabled=true;
+  els.locationButton.textContent='搜尋中…';
+
+  const requestedRadius=state.maxDistanceKm;
+  // 早餐資料在 OSM 常常沒有完整標籤。小範圍找不到時，自動依序擴到 0.5、1 公里。
+  const radii=state.category==='早餐'
+    ? [...new Set([requestedRadius, requestedRadius<0.5?0.5:null, requestedRadius<1?1:null].filter(Boolean))]
+    : [requestedRadius];
+
+  try{
+    let result=null;
+    let usedRadius=requestedRadius;
+    for(const radius of radii){
+      els.locationText.textContent=`搜尋 ${radius} 公里內${state.category}店家`;
+      result=await fetchOsmRestaurants(state.position.lat,state.position.lon,radius);
+      usedRadius=radius;
+      if(result.restaurants.length)break;
+    }
+
+    state.restaurants=result?.restaurants||[];
+    state.searchStats=result?.stats||{rawCount:0,returnedCount:0,normalizedCount:0,successfulTiles:0,totalTiles:0};
+    state.lastFetchedRadiusKm=usedRadius;
+    state.isLive=true;
+    state.selectedId=null;
+
+    if(state.restaurants.length){
+      if(usedRadius>requestedRadius){
+        state.maxDistanceKm=usedRadius;
+        els.locationText.textContent=`${requestedRadius} 公里內沒有早餐，已自動擴大到 ${usedRadius} 公里，找到 ${state.restaurants.length} 間`;
+        showNotice(`附近 ${requestedRadius} 公里內沒有明確早餐資料，已自動擴大到 ${usedRadius} 公里。`);
+      }else{
+        els.locationText.textContent=`${state.category}：找到 ${state.restaurants.length} 間候選`;
+        hideNotice();
+      }
+    }else{
+      els.locationText.textContent=`${state.category}：目前沒有找到符合店家`;
+      showNotice(`已搜尋到 ${usedRadius} 公里，仍沒有找到明確標示為「${state.category}」的店家。`);
+    }
+  }catch(e){
+    state.restaurants=[];
+    state.searchStats={rawCount:0,returnedCount:0,normalizedCount:0,successfulTiles:0,totalTiles:0};
+    state.isLive=false;
+    state.selectedId=null;
+    els.locationText.textContent='真實店家搜尋失敗';
+    showNotice(`${e.message}。沒有使用示範店家，請稍後重新搜尋。`);
+  }finally{
+    state.loading=false;
+    els.locationButton.disabled=false;
+    els.locationButton.textContent='重新搜尋';
+    render();
+  }
 }
 function useLocation(){
   if(!navigator.geolocation)return showNotice('這個瀏覽器不支援定位。請改用 Chrome 或 Safari 開啟。');

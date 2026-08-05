@@ -141,7 +141,7 @@ module.exports = async function handler(req, res) {
     const allowedCategories=['全部','早餐','正餐','小吃','飲料','甜點'];
     const category=allowedCategories.includes(String(req.query?.category)) ? String(req.query.category) : '全部';
     if (lat===null||lng===null) return sendJson(res,400,{error:'定位座標不正確。'});
-    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v22`;
+    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v26`;
     const cached=cache.get(cacheKey);
     if(cached&&Date.now()-cached.savedAt<CACHE_TTL_MS) return sendJson(res,200,cached.payload);
 
