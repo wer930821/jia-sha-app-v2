@@ -49,9 +49,7 @@ function queryFor(category, radius, lat, lng) {
   if (category === '早餐') return `${head}
     nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"~"${patterns.breakfast}",i]${around};
     nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["cuisine"~"(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)",i]${around};
-    nwr["shop"="bakery"]${around};
-    nwr["amenity"="cafe"]${around};
-    nwr["amenity"="fast_food"]${around};
+    nwr["shop"="bakery"]["name"~"${patterns.breakfast}",i]${around};
   ${tail}`;
   if (category === '正餐') return `${head}
     nwr["amenity"="restaurant"]${around};
@@ -92,10 +90,15 @@ function classify(tags, requestedCategory) {
   if (requestedCategory === '甜點' && new RegExp('豬腳|麵線|便當|餐盒|自助餐|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯', 'i').test(text)) {
     return { categoryHint: '正餐', confidence: '餐點名稱排除甜點' };
   }
+  if (requestedCategory === '早餐') {
+    const isBreakfast = new RegExp(patterns.breakfast, 'i').test(text) ||
+      /(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)/i.test(tags.cuisine || '');
+    const obviousNotBreakfast = new RegExp(`${strongMealPattern}|剉冰|挫冰|刨冰|冰品|豆花|仙草|蛋糕|乳酪|甜點|書屋|書店|炸雞|雞排|鹽酥`, 'i').test(text);
+    if (!isBreakfast || obviousNotBreakfast) return null;
+    return { categoryHint: '早餐', confidence: '明確早餐名稱／料理' };
+  }
   if (requestedCategory !== '全部') {
-    let confidence = '一般候選';
-    if (requestedCategory === '早餐' && (tags.shop === 'bakery' || tags.amenity === 'cafe')) confidence = '可能有早餐';
-    return { categoryHint: requestedCategory, confidence };
+    return { categoryHint: requestedCategory, confidence: '一般候選' };
   }
   if (new RegExp(patterns.breakfast, 'i').test(text) || /(breakfast|brunch|taiwanese_breakfast)/i.test(tags.cuisine || '')) return {categoryHint:'早餐',confidence:'名稱／料理判斷'};
   // 冰品與甜點要先於飲料判斷，避免『黑砂糖挫冰』因糖／茶相關字樣被歸到飲料。
@@ -137,7 +140,7 @@ module.exports = async function handler(req, res) {
     const allowedCategories=['全部','早餐','正餐','小吃','飲料','甜點'];
     const category=allowedCategories.includes(String(req.query?.category)) ? String(req.query.category) : '全部';
     if (lat===null||lng===null) return sendJson(res,400,{error:'定位座標不正確。'});
-    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v15`;
+    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v22`;
     const cached=cache.get(cacheKey);
     if(cached&&Date.now()-cached.savedAt<CACHE_TTL_MS) return sendJson(res,200,cached.payload);
 
@@ -151,6 +154,7 @@ module.exports = async function handler(req, res) {
       const id=`osm-${element.type}-${element.id}`;
       if(unique.has(id)) continue;
       const classification=classify(tags,category);
+      if(!classification) continue;
       unique.set(id,{
         id,name,brand:tags.brand||'',lat:placeLat,lng:placeLng,address:getAddress(tags),primaryType:getPrimaryType(tags),
         cuisine:tags.cuisine||'',description:tags.description||'',openingHours:tags.opening_hours||'',openNow:null,

@@ -60,6 +60,7 @@ els.resultCard.addEventListener('click', event=>{
 const blacklist=/(檳榔|菸酒|煙酒|彩券|投注站|藥局|診所|醫院|寵物|汽車|機車|洗衣|美容|美髮|按摩|旅館|民宿|便利商店|超商|全家|7-?ELEVEN|萊爾富|OK超商)/i;
 const breakfastWords=/(早餐|早午餐|晨間|早安|美而美|美芝城|弘爺|拉亞|麥味登|Q\s*Burger|漢堡大師|豆漿|蛋餅|飯糰|燒餅|油條|吐司|饅頭|蔥抓餅|三明治|brunch|breakfast)/i;
 const breakfastCuisine=/(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)/i;
+const breakfastRejectWords=/(炸雞|雞排|鹽酥|剉冰|挫冰|刨冰|冰品|豆花|仙草|蛋糕|乳酪|甜點|書屋|書店|豬腳|麵線|火鍋|牛排|咖哩|便當|餐盒)/i;
 const strongMealWords=/(豬腳|麵線|便當|餐盒|自助餐|食堂|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯|排骨|雞腿|粥|米粉|冬粉|板條|河粉|餛飩|拉麵|壽司|丼|義大利麵|披薩)/i;
 const drinkWords=/(茶湯會|清心|五十嵐|50嵐|可不可|麻古|迷客夏|龜記|大苑子|茶飲|飲料|手搖|紅茶冰|juice|bubble_tea|tea_shop)/i;
 const dessertWords=/(豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|挫冰|刨冰|黑砂糖冰|雪花冰|霜淇淋|冰淇淋|ice.?cream|dessert|pastry)/i;
@@ -106,7 +107,10 @@ function inferInfo(place){
   if(place.categoryHint){
     // 後端分類仍做最後一道防呆：明確飯麵主食不能進飲料。
     if(place.categoryHint==='飲料' && strongMealWords.test(text)) return {type:noodleWords.test(text)?'麵類':'飯類',group:'正餐',note:'餐點名稱排除飲料'};
-    if(place.categoryHint==='早餐') return {type:type==='bakery'?'麵包／輕早餐':'早餐',group:'早餐',note:place.classificationConfidence};
+    if(place.categoryHint==='早餐') {
+      if(breakfastRejectWords.test(text) || !(breakfastWords.test(text)||breakfastCuisine.test(cuisine))) return null;
+      return {type:'早餐',group:'早餐',note:place.classificationConfidence};
+    }
     if(place.categoryHint==='飲料') return {type:'飲料',group:'飲料',note:place.classificationConfidence};
     if(place.categoryHint==='甜點') return {type:'甜點',group:'甜點',note:place.classificationConfidence};
     if(place.categoryHint==='小吃') return {type:friedWords.test(text)?'炸物':'小吃',group:'小吃',note:place.classificationConfidence};
@@ -119,7 +123,7 @@ function inferInfo(place){
   if(breakfastWords.test(text)||breakfastCuisine.test(cuisine)) return {type:'早餐',group:'早餐'};
   if(dessertWords.test(text)||['ice_cream_shop','confectionery'].includes(type)) return {type:'甜點',group:'甜點'};
   if(drinkWords.test(text)||['beverage_shop','juice_shop','tea_house'].includes(type)) return {type:'飲料',group:'飲料'};
-  if(type==='bakery') return {type:'麵包／輕早餐',group:'早餐'};
+  if(type==='bakery' && breakfastWords.test(text)) return {type:'早餐',group:'早餐'};
   if(noodleWords.test(text)) return {type:'麵類',group:'正餐'};
   if(friedWords.test(text)) return {type:'炸物',group:'小吃'};
   if(snackWords.test(text)||/fast_food|food_court/.test(type)) return {type:'小吃',group:'小吃'};
