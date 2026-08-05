@@ -30,6 +30,7 @@ const transports=[
   {id:'scooter',label:'🛵 騎車',speed:25},
   {id:'car',label:'🚗 開車',speed:30}
 ];
+const closedReports=new Set(JSON.parse(localStorage.getItem('jiaShaClosedReports')||'[]'));
 const state={category:'全部',budget:null,maxDistanceKm:2,transport:'walk',excluded:[],openOnly:false,selectedId:null,restaurants:[...demoRestaurants],position:null,loading:false,isLive:false,lastFetchedRadiusKm:0,map:null,mapLoaded:false,mapMarkers:[],userMarker:null,searchStats:{rawCount:0,returnedCount:0,normalizedCount:0},menuSearches:new Map()};
 const ids=['map','mapStatus','fitMapButton','categoryChips','transportChips','exclusionChips','openOnly','chooseButton','resultCount','notice','resultCard','nearbyCount','restaurantList','locationButton','locationTitle','locationText','budgetInput','unlimitedBudget','distanceInput'];
 const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
@@ -48,6 +49,11 @@ els.resultCard.addEventListener('click', event=>{
     button.disabled=true;
     button.textContent='🔎 搜尋中…';
     return searchPublicMenu(selected);
+  }
+  if(button.dataset.action==='report-closed'){
+    const selected=state.restaurants.find(x=>x.id===state.selectedId);
+    if(selected)reportClosed(selected);
+    return;
   }
 });
 
@@ -228,7 +234,7 @@ function fitMapToResults(force=true){
   state.map.fitBounds(bounds,{padding:45,maxZoom:15,duration:force?700:0});
 }
 function budgetMatches(x){return state.budget===null||!x.menu?.length||x.menu.some(item=>item.price<=state.budget);}
-function getFiltered(){return state.restaurants.filter(x=>(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!state.openOnly||x.open!==false));}
+function getFiltered(){return state.restaurants.filter(x=>!closedReports.has(x.id)&&(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!state.openOnly||x.open!==false));}
 function makeChip(label,active,onClick,danger=false){const b=document.createElement('button');b.className=`chip${active?' active':''}${danger?' danger':''}`;b.textContent=label;b.onclick=onClick;return b;}
 function renderControls(){
   els.categoryChips.innerHTML='';categories.forEach(v=>els.categoryChips.appendChild(makeChip(v,state.category===v,async()=>{if(state.category===v)return;state.category=v;state.selectedId=null;render();if(state.position)await searchAtPosition();})));
@@ -248,12 +254,14 @@ function menuHtml(x){
     resultHtml='<div class="menu-search-status">正在搜尋公開菜單…</div>';
   }else if(search?.error){
     resultHtml=`<div class="menu-search-status error">${escapeHtml(search.error)}</div>`;
+  }else if(search?.businessStatus?.closed){
+    resultHtml='<div class="closed-warning"><strong>⚠️ 網路資料顯示這間店可能已歇業</strong><span>已停止找菜單，建議不要前往。</span></div>';
   }else if(search?.results?.length){
     const title=search.fallback?'可直接開啟的菜單搜尋':'找到的公開來源';
     const notice=search.notice?`<div class="menu-search-status">${escapeHtml(search.notice)}</div>`:'';
     resultHtml=`${notice}<div class="menu-search-results"><strong>${title}</strong>${search.results.map(r=>`<a class="menu-source-link" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(r.title)}</span><small>${escapeHtml(r.source||'公開網頁')}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</a>`).join('')}</div>`;
   }
-  return `<div class="menu-box"><div class="menu-head"><strong>品項資訊</strong><span>真實來源優先</span></div><div class="likely-title">依店名與類型推測可能有：</div><div class="likely-items">${likely}</div><small>以上不是官方菜單，只是幫你先判斷店家大概賣什麼。</small><button class="menu-search-button" data-action="menu-search" type="button">🔎 自動找公開菜單</button>${resultHtml}</div>`;
+  return `<div class="menu-box"><div class="menu-head"><strong>品項資訊</strong><span>真實來源優先</span></div><div class="likely-title">依店名與類型推測可能有：</div><div class="likely-items">${likely}</div><small>以上不是官方菜單，只是幫你先判斷店家大概賣什麼。</small><div class="menu-actions"><button class="menu-search-button" data-action="menu-search" type="button">🔎 自動找公開菜單</button><button class="report-closed-button" data-action="report-closed" type="button">回報已歇業</button></div>${resultHtml}</div>`;
 }
 async function searchPublicMenu(x){
   state.menuSearches.set(x.id,{loading:true,results:[]});renderResult();
@@ -264,7 +272,11 @@ async function searchPublicMenu(x){
     const response=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error||'菜單搜尋失敗');
-    state.menuSearches.set(x.id,{loading:false,results:data.results||[],query:data.query||'',notice:data.notice||'',fallback:Boolean(data.fallback)});
+    state.menuSearches.set(x.id,{loading:false,results:data.results||[],query:data.query||'',notice:data.notice||'',fallback:Boolean(data.fallback),businessStatus:data.businessStatus||{}});
+    if(data.businessStatus?.closed){
+      closedReports.add(x.id);
+      localStorage.setItem('jiaShaClosedReports',JSON.stringify([...closedReports]));
+    }
   }catch(error){
     const query=encodeURIComponent(`${x.name} ${x.address||''} 菜單 價目表`);
     state.menuSearches.set(x.id,{loading:false,fallback:true,notice:'自動搜尋逾時，先提供可直接開啟的搜尋。',results:[
@@ -274,6 +286,15 @@ async function searchPublicMenu(x){
   }finally{clearTimeout(timer)}
   renderResult();
 }
+
+function reportClosed(x){
+  closedReports.add(x.id);
+  localStorage.setItem('jiaShaClosedReports',JSON.stringify([...closedReports]));
+  state.selectedId=null;
+  showNotice(`已將「${x.name}」標記為可能歇業，之後不再推薦。`);
+  render();
+}
+
 function renderResult(){
   const x=state.restaurants.find(i=>i.id===state.selectedId);if(!x)return els.resultCard.classList.add('hidden');
   const within=x.menu?.length?(state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length):0;

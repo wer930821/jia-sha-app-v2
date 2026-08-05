@@ -31,6 +31,19 @@ function fetchHtml(url){
 }
 function parseResults(html){
   const results=[];
+  const blockRe=/<div[^>]+class="[^"]*result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+  let block;
+  while((block=blockRe.exec(html))&&results.length<8){
+    const body=block[1];
+    const link=body.match(/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+    if(!link)continue;
+    const url=unwrapDuckUrl(decode(link[1]));
+    if(!/^https?:\/\//i.test(url))continue;
+    const snippetMatch=body.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+    const host=(()=>{try{return new URL(url).hostname.replace(/^www\./,'')}catch{return'公開網頁'}})();
+    results.push({title:decode(link[2]),url,source:host,snippet:decode(snippetMatch?.[1]||'')});
+  }
+  if(results.length)return results;
   const linkRe=/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let match;
   while((match=linkRe.exec(html))&&results.length<6){
@@ -40,6 +53,12 @@ function parseResults(html){
     results.push({title:decode(match[2]),url,source:host,snippet:''});
   }
   return results;
+}
+function detectClosed(results,html=''){
+  const text=[...results.map(r=>`${r.title} ${r.snippet}`),decode(html.slice(0,250000))].join(' ');
+  const closed=/(永久歇業|已歇業|停止營業|結束營業|已關閉|永久關閉|歇業多年|closed permanently|permanently closed)/i.test(text);
+  const uncertain=/(疑似歇業|可能歇業|暫停營業|暫時停業|搬遷|已搬家)/i.test(text);
+  return {closed,uncertain};
 }
 function fallbackLinks(name,area){
   const query=`${name} ${area} 菜單 價目表`;
@@ -67,7 +86,8 @@ module.exports=async function handler(req,res){
     const parsed=parseResults(html);
     const preferred=/(facebook\.com|instagram\.com|ubereats\.com|foodpanda|inline\.app|menu|菜單|價目表|官方)/i;
     const results=parsed.sort((a,b)=>Number(preferred.test(b.url+' '+b.title))-Number(preferred.test(a.url+' '+a.title))).slice(0,5);
-    return send(res,200,{query,results:results.length?results:fallbacks,fallback:results.length===0});
+    const businessStatus=detectClosed(parsed,html);
+    return send(res,200,{query,results:results.length?results:fallbacks,fallback:results.length===0,businessStatus});
   }catch(error){
     return send(res,200,{query,results:fallbacks,fallback:true,notice:'自動擷取暫時失敗，已改提供可直接開啟的菜單搜尋。'});
   }
