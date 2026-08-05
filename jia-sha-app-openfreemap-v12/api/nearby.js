@@ -52,7 +52,7 @@ function queryFor(category, radius, lat, lng) {
     nwr["amenity"~"^(restaurant|cafe|fast_food)$"]${around};
     nwr["shop"="bakery"]${around};
   ${tail}`;
-  if (category === '正餐') return `${head}
+  if (['正餐','午餐','晚餐','宵夜'].includes(category)) return `${head}
     nwr["amenity"="restaurant"]${around};
     nwr["amenity"="food_court"]${around};
     nwr["amenity"="fast_food"]${around};
@@ -98,6 +98,9 @@ function classify(tags, requestedCategory) {
     if (!isBreakfast || obviousNotBreakfast) return null;
     return { categoryHint: '早餐', confidence: '明確早餐名稱／料理' };
   }
+  if (['正餐','午餐','晚餐','宵夜'].includes(requestedCategory)) {
+    return { categoryHint: requestedCategory, confidence: '餐別候選，依營業時間再篩選' };
+  }
   if (requestedCategory !== '全部') {
     return { categoryHint: requestedCategory, confidence: '一般候選' };
   }
@@ -138,7 +141,7 @@ module.exports = async function handler(req, res) {
     if (!isAllowed(req)) return sendJson(res,429,{error:'搜尋太頻繁，請稍後再試。'});
     const lat=validNumber(req.query?.lat,-90,90), lng=validNumber(req.query?.lng,-180,180);
     const radius=Math.min(6000,Math.max(300,Number(req.query?.radius)||2000));
-    const allowedCategories=['全部','早餐','正餐','小吃','飲料','甜點'];
+    const allowedCategories=['全部','早餐','午餐','晚餐','宵夜','正餐','小吃','飲料','甜點'];
     const category=allowedCategories.includes(String(req.query?.category)) ? String(req.query.category) : '全部';
     if (lat===null||lng===null) return sendJson(res,400,{error:'定位座標不正確。'});
     const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v26`;

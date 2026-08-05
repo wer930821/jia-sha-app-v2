@@ -23,7 +23,7 @@ function demo(id,name,type,group,distanceKm,rating){
   return {id,name,type,group,distanceKm,rating,open:true,address:'台中市南屯區',tags:['示範店家'],lat:24.145,lon:120.646,menu,priceMin:bounds.min,priceMax:bounds.max,menuSource:'示範菜單',source:'示範資料'};
 }
 
-const categories=['全部','早餐','正餐','小吃','飲料','甜點'];
+const categories=['全部','早餐','午餐','晚餐','宵夜','小吃','飲料','甜點'];
 const exclusions=['麵類','炸物','早餐','飲料'];
 const transports=[
   {id:'walk',label:'🚶 走路',speed:4.8},
@@ -114,10 +114,10 @@ function inferInfo(place){
     if(place.categoryHint==='飲料') return {type:'飲料',group:'飲料',note:place.classificationConfidence};
     if(place.categoryHint==='甜點') return {type:'甜點',group:'甜點',note:place.classificationConfidence};
     if(place.categoryHint==='小吃') return {type:friedWords.test(text)?'炸物':'小吃',group:'小吃',note:place.classificationConfidence};
-    if(place.categoryHint==='正餐'){
-      if(noodleWords.test(text)) return {type:'麵類',group:'正餐',note:place.classificationConfidence};
-      if(/便當|飯|自助餐|餐盒|食堂|台菜|中式|火鍋|燒肉|牛排|咖哩|水餃|鍋貼/i.test(text)) return {type:'飯類',group:'正餐',note:place.classificationConfidence};
-      return {type:'餐廳',group:'正餐',note:place.classificationConfidence};
+    if(['正餐','午餐','晚餐','宵夜'].includes(place.categoryHint)){
+      if(noodleWords.test(text)) return {type:'麵類',group:place.categoryHint==='正餐'?'正餐':place.categoryHint,note:place.classificationConfidence};
+      if(/便當|飯|自助餐|餐盒|食堂|台菜|中式|火鍋|燒肉|牛排|咖哩|水餃|鍋貼/i.test(text)) return {type:'飯類',group:place.categoryHint==='正餐'?'正餐':place.categoryHint,note:place.classificationConfidence};
+      return {type:'餐廳',group:place.categoryHint==='正餐'?'正餐':place.categoryHint,note:place.classificationConfidence};
     }
   }
   if(breakfastWords.test(text)||breakfastCuisine.test(cuisine)) return {type:'早餐',group:'早餐'};
@@ -176,13 +176,73 @@ async function fetchOsmRestaurants(lat,lon,radiusKm){
     stats:{rawCount,returnedCount,normalizedCount:unique.size,successfulTiles:successful.length,totalTiles:centers.length}
   };
 }
+
+const mealPeriods={
+  早餐:{hour:8,minute:0,label:'早餐時段'},
+  午餐:{hour:12,minute:0,label:'午餐時段'},
+  晚餐:{hour:18,minute:30,label:'晚餐時段'},
+  宵夜:{hour:23,minute:0,label:'宵夜時段'}
+};
+const dayIndex={Su:0,Mo:1,Tu:2,We:3,Th:4,Fr:5,Sa:6};
+function parseMinutes(v){
+  const m=String(v||'').match(/^(\d{1,2}):(\d{2})$/);if(!m)return null;
+  const h=Number(m[1]),min=Number(m[2]);return h>=0&&h<=24&&min>=0&&min<60?h*60+min:null;
+}
+function dayMatches(expr,day){
+  if(!expr)return true;
+  const parts=expr.split(',').map(x=>x.trim()).filter(Boolean);
+  return parts.some(part=>{
+    const range=part.match(/^(Mo|Tu|We|Th|Fr|Sa|Su)-(Mo|Tu|We|Th|Fr|Sa|Su)$/);
+    if(range){const a=dayIndex[range[1]],b=dayIndex[range[2]];return a<=b?(day>=a&&day<=b):(day>=a||day<=b);}
+    return dayIndex[part]===day;
+  });
+}
+function openingStatusAt(openingHours,date){
+  const raw=String(openingHours||'').trim();
+  if(!raw)return {known:false,open:null};
+  if(/^24\s*\/\s*7$/i.test(raw))return {known:true,open:true};
+  const minute=date.getHours()*60+date.getMinutes(),day=date.getDay(),prevDay=(day+6)%7;
+  let understood=false,open=false;
+  for(const clause0 of raw.split(';')){
+    const clause=clause0.trim();if(!clause)continue;
+    if(/appointment|unknown|sunrise|sunset|PH|SH/i.test(clause))continue;
+    const off=/\boff\b|\bclosed\b/i.test(clause);
+    const dayPart=(clause.match(/(?:^|\s)((?:(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)(?:,(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)*)/i)||[])[1]||'';
+    const times=[...clause.matchAll(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/g)];
+    if(off&&dayMatches(dayPart,day)){understood=true;continue;}
+    for(const t of times){
+      const start=parseMinutes(t[1]),end=parseMinutes(t[2]);if(start===null||end===null)continue;
+      understood=true;
+      if(end>start){if(dayMatches(dayPart,day)&&minute>=start&&minute<end)open=true;}
+      else{
+        if((dayMatches(dayPart,day)&&minute>=start)||(dayMatches(dayPart,prevDay)&&minute<end))open=true;
+      }
+    }
+  }
+  return {known:understood,open:understood?open:null};
+}
+function mealReferenceDate(category){
+  const period=mealPeriods[category];if(!period)return new Date();
+  const d=new Date();d.setHours(period.hour,period.minute,0,0);return d;
+}
+function mealStatus(openingHours,category){
+  if(!mealPeriods[category])return {known:false,open:null,label:''};
+  const result=openingStatusAt(openingHours,mealReferenceDate(category));
+  return {...result,label:mealPeriods[category].label};
+}
+
 function normalizeOsmPlace(place,userLat,userLon){
   if(!place.name||!Number.isFinite(place.lat)||!Number.isFinite(place.lng))return null;
   const info=inferInfo(place); if(!info)return null;
   const distanceKm=haversine(userLat,userLon,place.lat,place.lng);
   const tags=['OpenStreetMap 店家'];
   if(info.note)tags.push(info.note);
-  return {id:place.id,name:place.name,type:info.type,group:info.group,distanceKm:+distanceKm.toFixed(2),rating:null,open:place.openNow,address:place.address||'附近店家',tags,lat:place.lat,lon:place.lng,menu:[],priceMin:null,priceMax:null,menuSource:'尚未收錄真實菜單',source:'OpenStreetMap'};
+  const openingHours=place.openingHours||'';
+  const nowStatus=openingStatusAt(openingHours,new Date());
+  const periodStatus=mealStatus(openingHours,state.category);
+  if(periodStatus.known)tags.push(periodStatus.open?`${periodStatus.label}營業`:`${periodStatus.label}休息`);
+  else if(mealPeriods[state.category])tags.push('營業時間未確認');
+  return {id:place.id,name:place.name,type:info.type,group:info.group,distanceKm:+distanceKm.toFixed(2),rating:null,open:nowStatus.open,address:place.address||'附近店家',tags,lat:place.lat,lon:place.lng,openingHours,mealOpen:periodStatus.open,mealHoursKnown:periodStatus.known,menu:[],priceMin:null,priceMax:null,menuSource:'尚未收錄真實菜單',source:'OpenStreetMap'};
 }
 
 function initMap(){
@@ -245,7 +305,7 @@ function fitMapToResults(force=true){
   state.map.fitBounds(bounds,{padding:45,maxZoom:15,duration:force?700:0});
 }
 function budgetMatches(x){return state.budget===null||!x.menu?.length||x.menu.some(item=>item.price<=state.budget);}
-function getFiltered(){return state.restaurants.filter(x=>!closedReports.has(x.id)&&(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!state.openOnly||x.open!==false));}
+function getFiltered(){return state.restaurants.filter(x=>!closedReports.has(x.id)&&(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!mealPeriods[state.category]||x.mealOpen!==false)&&(!state.openOnly||x.open!==false));}
 function makeChip(label,active,onClick,danger=false){const b=document.createElement('button');b.className=`chip${active?' active':''}${danger?' danger':''}`;b.textContent=label;b.onclick=onClick;return b;}
 function renderControls(){
   els.categoryChips.innerHTML='';categories.forEach(v=>els.categoryChips.appendChild(makeChip(v,state.category===v,async()=>{
@@ -329,13 +389,13 @@ function reportClosed(x){
 function renderResult(){
   const x=state.restaurants.find(i=>i.id===state.selectedId);if(!x)return els.resultCard.classList.add('hidden');
   const within=x.menu?.length?(state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length):0;
-  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${x.menu?.length?(state.budget===null?'已有菜單資料':`${within} 項真實餐點在 $${state.budget} 內`):'真實價格尚未收錄'}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'營業時間未確認'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" data-action="change" type="button">🔄 換一家</button><button class="map-button" data-action="map" type="button">🧭 確認店家定位</button></div>`;
+  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${x.menu?.length?(state.budget===null?'已有菜單資料':`${within} 項真實餐點在 $${state.budget} 內`):'真實價格尚未收錄'}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'目前營業狀態未確認'}</div><div>📅 ${x.openingHours?escapeHtml(x.openingHours):'營業時間未收錄'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" data-action="change" type="button">🔄 換一家</button><button class="map-button" data-action="map" type="button">🧭 確認店家定位</button></div>`;
   els.resultCard.classList.remove('hidden');updateSelectedMarkerClasses();
 }
 function renderList(){
   const f=getFiltered();els.nearbyCount.textContent=`${f.length} 間`;const st=state.searchStats;els.resultCount.textContent=state.isLive?`分區 ${st.successfulTiles||1}/${st.totalTiles||1} 成功 · 資料源 ${st.rawCount} 筆 → 可用 ${st.normalizedCount} 間 → 最後符合 ${f.length} 間`:'尚未取得真實店家資料';els.restaurantList.innerHTML='';
   if(!f.length)els.restaurantList.innerHTML='<div class="empty-list">目前沒有取得符合條件的真實店家。請查看上方搜尋狀態或稍後重新搜尋。</div>';
-  f.forEach(x=>{const b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${x.menu?.length?'已有菜單':'可自動找菜單'}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>查看</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();updateSelectedMarkerClasses();scrollToResultCard();};els.restaurantList.appendChild(b);});
+  f.forEach(x=>{const b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${x.menu?.length?'已有菜單':'可自動找菜單'}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km${x.openingHours?` · ${escapeHtml(x.openingHours)}`:' · 時間未確認'}</small></div><b>查看</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();updateSelectedMarkerClasses();scrollToResultCard();};els.restaurantList.appendChild(b);});
 }
 function render(){
   renderControls();
