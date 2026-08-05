@@ -249,21 +249,29 @@ function menuHtml(x){
   }else if(search?.error){
     resultHtml=`<div class="menu-search-status error">${escapeHtml(search.error)}</div>`;
   }else if(search?.results?.length){
-    resultHtml=`<div class="menu-search-results"><strong>找到的公開來源</strong>${search.results.map(r=>`<a class="menu-source-link" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(r.title)}</span><small>${escapeHtml(r.source||'公開網頁')}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</a>`).join('')}</div>`;
+    const title=search.fallback?'可直接開啟的菜單搜尋':'找到的公開來源';
+    const notice=search.notice?`<div class="menu-search-status">${escapeHtml(search.notice)}</div>`:'';
+    resultHtml=`${notice}<div class="menu-search-results"><strong>${title}</strong>${search.results.map(r=>`<a class="menu-source-link" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(r.title)}</span><small>${escapeHtml(r.source||'公開網頁')}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</a>`).join('')}</div>`;
   }
   return `<div class="menu-box"><div class="menu-head"><strong>品項資訊</strong><span>真實來源優先</span></div><div class="likely-title">依店名與類型推測可能有：</div><div class="likely-items">${likely}</div><small>以上不是官方菜單，只是幫你先判斷店家大概賣什麼。</small><button class="menu-search-button" data-action="menu-search" type="button">🔎 自動找公開菜單</button>${resultHtml}</div>`;
 }
 async function searchPublicMenu(x){
   state.menuSearches.set(x.id,{loading:true,results:[]});renderResult();
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),9000);
   try{
     const url=`/api/menu-search?name=${encodeURIComponent(x.name)}&address=${encodeURIComponent(x.address||'')}`;
-    const response=await fetch(url,{headers:{Accept:'application/json'}});
+    const response=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data.error||'菜單搜尋失敗');
-    state.menuSearches.set(x.id,{loading:false,results:data.results||[],query:data.query||''});
+    state.menuSearches.set(x.id,{loading:false,results:data.results||[],query:data.query||'',notice:data.notice||'',fallback:Boolean(data.fallback)});
   }catch(error){
-    state.menuSearches.set(x.id,{loading:false,results:[],error:error.message||'目前找不到公開菜單'});
-  }
+    const query=encodeURIComponent(`${x.name} ${x.address||''} 菜單 價目表`);
+    state.menuSearches.set(x.id,{loading:false,fallback:true,notice:'自動搜尋逾時，先提供可直接開啟的搜尋。',results:[
+      {title:`Google 搜尋「${x.name} 菜單」`,url:`https://www.google.com/search?q=${query}`,source:'Google 搜尋',snippet:'搜尋官方菜單、價目表與菜單照片'},
+      {title:`Bing 搜尋「${x.name} 菜單」`,url:`https://www.bing.com/search?q=${query}`,source:'Bing 搜尋',snippet:'查看公開網站與菜單圖片'}
+    ]});
+  }finally{clearTimeout(timer)}
   renderResult();
 }
 function renderResult(){
