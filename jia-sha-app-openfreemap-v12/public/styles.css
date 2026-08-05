@@ -31,3 +31,7 @@
 .menu-search-button{position:relative;z-index:5;pointer-events:auto!important;touch-action:manipulation}.menu-search-button:disabled{opacity:.65;cursor:wait}
 
 .menu-actions{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:12px}.report-closed-button{border:1px solid #d8d2c8;background:#fff;color:#6e665d;border-radius:12px;padding:11px 12px;font-weight:800}.closed-warning{margin-top:12px;padding:13px;border-radius:13px;background:#fff0ed;color:#9a2e1c;display:grid;gap:4px}.closed-warning span{font-size:12px}.menu-search-button{margin-top:0!important}@media(max-width:420px){.menu-actions{grid-template-columns:1fr}.report-closed-button{width:100%}}
+
+/* v25：讓結果卡成為穩定的捲動錨點，避免手機版面重排時跳走 */
+.result-card{scroll-margin-top:12px;overflow-anchor:none}
+#chooseButton:disabled{opacity:.72;cursor:wait}

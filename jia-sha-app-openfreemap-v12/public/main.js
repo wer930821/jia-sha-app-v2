@@ -202,9 +202,16 @@ function clearMapMarkers(){
   state.mapMarkers=[];
   if(state.userMarker){state.userMarker.remove();state.userMarker=null;}
 }
+function scrollToResultCard(){
+  // 等卡片完成排版後再捲動，避免手機因高度變化跳過頭。
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const top=els.resultCard.getBoundingClientRect().top+window.scrollY-12;
+    window.scrollTo({top:Math.max(0,top),behavior:'smooth'});
+  }));
+}
 function selectFromMap(id){
-  state.selectedId=id;hideNotice();renderResult();updateMap();
-  els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});
+  state.selectedId=id;hideNotice();renderResult();updateSelectedMarkerClasses();
+  scrollToResultCard();
 }
 function updateMap(){
   if(!state.mapLoaded||!state.map)return;
@@ -252,10 +259,24 @@ function renderControls(){
   els.exclusionChips.innerHTML='';exclusions.forEach(v=>els.exclusionChips.appendChild(makeChip(v,state.excluded.includes(v),()=>{state.excluded=state.excluded.includes(v)?state.excluded.filter(x=>x!==v):[...state.excluded,v];render()},state.excluded.includes(v))));
   els.openOnly.checked=state.openOnly; els.unlimitedBudget.checked=state.budget===null; els.budgetInput.disabled=state.budget===null; els.budgetInput.value=state.budget??''; els.distanceInput.value=state.maxDistanceKm;
 }
-function chooseRestaurant(){const f=getFiltered();if(!f.length)return showNotice(`目前沒有符合條件的店。可增加距離、切到「全部」，或關閉「只看營業中」。`);const p=f.length>1?f.filter(x=>x.id!==state.selectedId):f;state.selectedId=p[Math.floor(Math.random()*p.length)].id;hideNotice();renderResult();els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});}
+function chooseRestaurant(){
+  const f=getFiltered();
+  if(!f.length)return showNotice(`目前沒有符合條件的店。可增加距離、切到「全部」，或關閉「只看營業中」。`);
+  if(els.chooseButton.disabled)return;
+  els.chooseButton.disabled=true;
+  const p=f.length>1?f.filter(x=>x.id!==state.selectedId):f;
+  state.selectedId=p[Math.floor(Math.random()*p.length)].id;
+  hideNotice();renderResult();updateSelectedMarkerClasses();scrollToResultCard();
+  setTimeout(()=>{els.chooseButton.disabled=false;},450);
+}
 function showNotice(m){els.notice.textContent=m;els.notice.classList.remove('hidden');els.resultCard.classList.add('hidden');}
 function hideNotice(){els.notice.classList.add('hidden');}
-function mapUrl(x){return `https://www.google.com/maps/dir/?api=1&destination=${x.lat},${x.lon}`;}
+function mapUrl(x){
+  const usableAddress=x.address&&x.address!=='附近店家'?x.address:'';
+  // 店名＋地址可避免同名分店；座標放在查詢尾端作為第二層校正。
+  const query=[x.name,usableAddress,`${x.lat},${x.lon}`].filter(Boolean).join(' ');
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
 function menuHtml(x){
   const search=state.menuSearches.get(x.id);
   const likely=probableItemsFor(x).map(item=>`<span class="likely-item">${escapeHtml(item)}</span>`).join('');
@@ -308,15 +329,19 @@ function reportClosed(x){
 function renderResult(){
   const x=state.restaurants.find(i=>i.id===state.selectedId);if(!x)return els.resultCard.classList.add('hidden');
   const within=x.menu?.length?(state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length):0;
-  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${x.menu?.length?(state.budget===null?'已有菜單資料':`${within} 項真實餐點在 $${state.budget} 內`):'真實價格尚未收錄'}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'營業時間未確認'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" data-action="change" type="button">🔄 換一家</button><button class="map-button" data-action="map" type="button">🧭 Google 地圖</button></div>`;
+  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${x.menu?.length?(state.budget===null?'已有菜單資料':`${within} 項真實餐點在 $${state.budget} 內`):'真實價格尚未收錄'}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'營業時間未確認'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" data-action="change" type="button">🔄 換一家</button><button class="map-button" data-action="map" type="button">🧭 確認店家定位</button></div>`;
   els.resultCard.classList.remove('hidden');updateSelectedMarkerClasses();
 }
 function renderList(){
   const f=getFiltered();els.nearbyCount.textContent=`${f.length} 間`;const st=state.searchStats;els.resultCount.textContent=state.isLive?`分區 ${st.successfulTiles||1}/${st.totalTiles||1} 成功 · 資料源 ${st.rawCount} 筆 → 可用 ${st.normalizedCount} 間 → 最後符合 ${f.length} 間`:'尚未取得真實店家資料';els.restaurantList.innerHTML='';
   if(!f.length)els.restaurantList.innerHTML='<div class="empty-list">目前沒有取得符合條件的真實店家。請查看上方搜尋狀態或稍後重新搜尋。</div>';
-  f.forEach(x=>{const b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${x.menu?.length?'已有菜單':'可自動找菜單'}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>查看</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});};els.restaurantList.appendChild(b);});
+  f.forEach(x=>{const b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${x.menu?.length?'已有菜單':'可自動找菜單'}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>查看</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();updateSelectedMarkerClasses();scrollToResultCard();};els.restaurantList.appendChild(b);});
 }
-function render(){renderControls();renderList();if(state.selectedId&&!getFiltered().some(x=>x.id===state.selectedId))state.selectedId=null;renderResult();updateMap();}
+function render(){
+  renderControls();
+  if(state.selectedId&&!getFiltered().some(x=>x.id===state.selectedId))state.selectedId=null;
+  renderList();renderResult();updateMap();
+}
 
 async function searchAtPosition(){
   if(!state.position)return useLocation();
