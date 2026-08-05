@@ -241,7 +241,13 @@ function budgetMatches(x){return state.budget===null||!x.menu?.length||x.menu.so
 function getFiltered(){return state.restaurants.filter(x=>!closedReports.has(x.id)&&(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!state.openOnly||x.open!==false));}
 function makeChip(label,active,onClick,danger=false){const b=document.createElement('button');b.className=`chip${active?' active':''}${danger?' danger':''}`;b.textContent=label;b.onclick=onClick;return b;}
 function renderControls(){
-  els.categoryChips.innerHTML='';categories.forEach(v=>els.categoryChips.appendChild(makeChip(v,state.category===v,async()=>{if(state.category===v)return;state.category=v;state.selectedId=null;render();if(state.position)await searchAtPosition();})));
+  els.categoryChips.innerHTML='';categories.forEach(v=>els.categoryChips.appendChild(makeChip(v,state.category===v,async()=>{
+    if(state.category===v)return;
+    state.category=v;state.selectedId=null;render();
+    // 手機第一次直接點分類時，也要主動取得位置，不能只停在示範畫面。
+    if(state.position) await searchAtPosition();
+    else useLocation();
+  })));
   els.transportChips.innerHTML='';transports.forEach(v=>els.transportChips.appendChild(makeChip(v.label,state.transport===v.id,()=>{state.transport=v.id;render()})));
   els.exclusionChips.innerHTML='';exclusions.forEach(v=>els.exclusionChips.appendChild(makeChip(v,state.excluded.includes(v),()=>{state.excluded=state.excluded.includes(v)?state.excluded.filter(x=>x!==v):[...state.excluded,v];render()},state.excluded.includes(v))));
   els.openOnly.checked=state.openOnly; els.unlimitedBudget.checked=state.budget===null; els.budgetInput.disabled=state.budget===null; els.budgetInput.value=state.budget??''; els.distanceInput.value=state.maxDistanceKm;
@@ -320,9 +326,29 @@ async function searchAtPosition(){
   finally{state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='重新搜尋';render();}
 }
 function useLocation(){
-  if(!navigator.geolocation)return showNotice('這個瀏覽器不支援定位，先使用示範資料。');
+  if(!navigator.geolocation)return showNotice('這個瀏覽器不支援定位。請改用 Chrome 或 Safari 開啟。');
+  if(!window.isSecureContext)return showNotice('定位需要 HTTPS 安全連線，請從正式網站網址開啟。');
+  if(state.loading)return;
   state.loading=true;els.locationButton.disabled=true;els.locationButton.textContent='定位中…';
-  navigator.geolocation.getCurrentPosition(p=>{state.position={lat:p.coords.latitude,lon:p.coords.longitude};els.locationTitle.textContent='已取得目前位置';searchAtPosition();},e=>{state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='再試一次';const m={1:'你拒絕了定位權限，請在瀏覽器設定中允許位置存取。',2:'目前無法取得位置。',3:'定位逾時，請再試一次。'};showNotice(m[e.code]||'定位失敗，先使用示範資料。');},{enableHighAccuracy:true,timeout:12000,maximumAge:300000});
+
+  const success=p=>{
+    state.position={lat:p.coords.latitude,lon:p.coords.longitude};
+    els.locationTitle.textContent='已取得目前位置';
+    els.locationText.textContent='正在搜尋附近店家';
+    searchAtPosition();
+  };
+  const fail=e=>{
+    state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='再試一次';
+    const m={1:'定位權限被關閉。請到瀏覽器的網站設定，將「位置」改為允許後再試一次。',2:'手機目前無法取得位置，請先開啟系統定位服務。',3:'定位逾時，請移到訊號較好的地方再試一次。'};
+    showNotice(m[e.code]||'定位失敗，請稍後再試一次。');
+  };
+
+  // 先用高精度；Android 某些瀏覽器若逾時，再自動改用一般定位。
+  navigator.geolocation.getCurrentPosition(success,e=>{
+    if(e.code===1)return fail(e);
+    els.locationText.textContent='高精度定位較慢，正在改用一般定位…';
+    navigator.geolocation.getCurrentPosition(success,fail,{enableHighAccuracy:false,timeout:15000,maximumAge:600000});
+  },{enableHighAccuracy:true,timeout:8000,maximumAge:300000});
 }
 
 els.budgetInput.onchange=e=>{state.budget=Math.max(0,Number(e.target.value)||0);render();};
