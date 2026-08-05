@@ -46,10 +46,11 @@ function queryFor(category, radius, lat, lng) {
   const around = `(around:${radius},${lat},${lng})`;
   const head = '[out:json][timeout:18];(';
   const tail = ');out center tags 700;';
+  // 早餐不要在 Overpass 查詢階段使用很長的中文正則。
+  // 部分節點會因此逾時或回傳 5xx；先抓附近可能的餐飲店，再由 classify() 嚴格篩選。
   if (category === '早餐') return `${head}
-    nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"~"${patterns.breakfast}",i]${around};
-    nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["cuisine"~"(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)",i]${around};
-    nwr["shop"="bakery"]["name"~"${patterns.breakfast}",i]${around};
+    nwr["amenity"~"^(restaurant|cafe|fast_food)$"]${around};
+    nwr["shop"="bakery"]${around};
   ${tail}`;
   if (category === '正餐') return `${head}
     nwr["amenity"="restaurant"]${around};

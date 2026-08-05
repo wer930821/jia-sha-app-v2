@@ -321,7 +321,7 @@ function render(){renderControls();renderList();if(state.selectedId&&!getFiltere
 async function searchAtPosition(){
   if(!state.position)return useLocation();
   state.loading=true;els.locationButton.disabled=true;els.locationButton.textContent='搜尋中…';els.locationText.textContent=`搜尋 ${state.maxDistanceKm} 公里內店家`;
-  try{const result=await fetchOsmRestaurants(state.position.lat,state.position.lon,state.maxDistanceKm);if(!result.restaurants.length)throw new Error('附近找不到已收錄的餐飲店家');state.restaurants=result.restaurants;state.searchStats=result.stats;state.lastFetchedRadiusKm=state.maxDistanceKm;state.isLive=true;state.selectedId=null;els.locationText.textContent=`${state.category}：找到 ${result.restaurants.length} 間候選`;hideNotice();}
+  try{const result=await fetchOsmRestaurants(state.position.lat,state.position.lon,state.maxDistanceKm);state.restaurants=result.restaurants;state.searchStats=result.stats;state.lastFetchedRadiusKm=state.maxDistanceKm;state.isLive=true;state.selectedId=null;if(result.restaurants.length){els.locationText.textContent=`${state.category}：找到 ${result.restaurants.length} 間候選`;hideNotice();}else{els.locationText.textContent=`${state.category}：目前沒有找到符合店家`;showNotice(`已成功搜尋附近資料，但 ${state.maxDistanceKm} 公里內沒有找到明確標示為「${state.category}」的店家。可以增加距離後再搜尋。`);}}
   catch(e){state.restaurants=[];state.searchStats={rawCount:0,returnedCount:0,normalizedCount:0,successfulTiles:0,totalTiles:0};state.isLive=false;state.selectedId=null;els.locationText.textContent='真實店家搜尋失敗';showNotice(`${e.message}。沒有使用示範店家，請稍後重新搜尋。`);}
   finally{state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='重新搜尋';render();}
 }
