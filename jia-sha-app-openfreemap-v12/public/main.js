@@ -30,7 +30,7 @@ const transports=[
   {id:'scooter',label:'🛵 騎車',speed:25},
   {id:'car',label:'🚗 開車',speed:30}
 ];
-const state={category:'全部',budget:null,maxDistanceKm:2,transport:'walk',excluded:[],openOnly:false,selectedId:null,restaurants:[...demoRestaurants],position:null,loading:false,isLive:false,lastFetchedRadiusKm:0,map:null,mapLoaded:false,mapMarkers:[],userMarker:null,searchStats:{rawCount:0,returnedCount:0,normalizedCount:0}};
+const state={category:'全部',budget:null,maxDistanceKm:2,transport:'walk',excluded:[],openOnly:false,selectedId:null,restaurants:[...demoRestaurants],position:null,loading:false,isLive:false,lastFetchedRadiusKm:0,map:null,mapLoaded:false,mapMarkers:[],userMarker:null,searchStats:{rawCount:0,returnedCount:0,normalizedCount:0},menuSearches:new Map()};
 const ids=['map','mapStatus','fitMapButton','categoryChips','transportChips','exclusionChips','openOnly','chooseButton','resultCount','notice','resultCard','nearbyCount','restaurantList','locationButton','locationTitle','locationText','budgetInput','unlimitedBudget','distanceInput'];
 const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 
@@ -39,10 +39,34 @@ const breakfastWords=/(早餐|早午餐|晨間|早安|美而美|美芝城|弘爺
 const breakfastCuisine=/(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)/i;
 const strongMealWords=/(豬腳|麵線|便當|餐盒|自助餐|食堂|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯|排骨|雞腿|粥|米粉|冬粉|板條|河粉|餛飩|拉麵|壽司|丼|義大利麵|披薩)/i;
 const drinkWords=/(茶湯會|清心|五十嵐|50嵐|可不可|麻古|迷客夏|龜記|大苑子|茶飲|飲料|手搖|紅茶冰|juice|bubble_tea|tea_shop)/i;
-const dessertWords=/(豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|雪花冰|霜淇淋|ice.?cream|dessert|pastry)/i;
+const dessertWords=/(豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|挫冰|刨冰|黑砂糖冰|雪花冰|霜淇淋|冰淇淋|ice.?cream|dessert|pastry)/i;
 const snackWords=/(鹽酥雞|雞排|滷味|臭豆腐|地瓜球|肉圓|蚵仔煎|甜不辣|關東煮|小吃|夜市|snack)/i;
 const noodleWords=/(麵|拉麵|烏龍|意麵|米粉|冬粉|板條|河粉|noodle|ramen)/i;
 const friedWords=/(炸|鹽酥|雞排|fried)/i;
+
+
+const probableItems={
+  早餐:['蛋餅','吐司','漢堡','蘿蔔糕','豆漿','奶茶'],
+  '麵包／輕早餐':['麵包','三明治','咖啡','吐司','甜麵包'],
+  飯類:['飯類主餐','便當','湯品','小菜'],
+  麵類:['麵食','湯麵','乾麵','小菜'],
+  小吃:['招牌小吃','湯品','滷味或小菜'],
+  炸物:['炸物','雞排或鹽酥類','蔬菜炸物'],
+  飲料:['茶飲','奶茶','果茶','咖啡'],
+  甜點:['冰品','豆花或仙草','甜湯','配料'],
+  餐廳:['主餐','套餐','湯品','飲料']
+};
+function probableItemsFor(x){
+  const text=x.name||'';
+  if(/豬腳.*麵線|麵線.*豬腳/i.test(text))return ['豬腳麵線','豬腳飯','滷蛋','油豆腐','燙青菜'];
+  if(/剉冰|挫冰|刨冰|黑砂糖冰/i.test(text))return ['黑砂糖冰','剉冰','豆花','仙草','粉粿','芋圓'];
+  if(/豆花/i.test(text))return ['豆花','仙草','粉圓','花生','芋圓'];
+  if(/雞肉飯/i.test(text))return ['雞肉飯','滷肉飯','湯品','燙青菜','滷蛋'];
+  if(/滷肉飯|魯肉飯/i.test(text))return ['滷肉飯','湯品','燙青菜','滷蛋','油豆腐'];
+  if(/牛肉麵/i.test(text))return ['牛肉麵','乾麵','水餃','小菜'];
+  if(/早餐|早午餐|美而美|美芝城|弘爺|拉亞|麥味登/i.test(text))return probableItems.早餐;
+  return probableItems[x.type]||probableItems.餐廳;
+}
 
 function haversine(a,b,c,d){const r=6371,x=(c-a)*Math.PI/180,y=(d-b)*Math.PI/180,q=Math.sin(x/2)**2+Math.cos(a*Math.PI/180)*Math.cos(c*Math.PI/180)*Math.sin(y/2)**2;return r*2*Math.atan2(Math.sqrt(q),Math.sqrt(1-q));}
 function escapeHtml(value=''){return String(value).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
@@ -70,8 +94,8 @@ function inferInfo(place){
     }
   }
   if(breakfastWords.test(text)||breakfastCuisine.test(cuisine)) return {type:'早餐',group:'早餐'};
-  if(drinkWords.test(text)||['beverage_shop','juice_shop','tea_house'].includes(type)) return {type:'飲料',group:'飲料'};
   if(dessertWords.test(text)||['ice_cream_shop','confectionery'].includes(type)) return {type:'甜點',group:'甜點'};
+  if(drinkWords.test(text)||['beverage_shop','juice_shop','tea_house'].includes(type)) return {type:'飲料',group:'飲料'};
   if(type==='bakery') return {type:'麵包／輕早餐',group:'早餐'};
   if(noodleWords.test(text)) return {type:'麵類',group:'正餐'};
   if(friedWords.test(text)) return {type:'炸物',group:'小吃'};
@@ -128,10 +152,10 @@ async function fetchOsmRestaurants(lat,lon,radiusKm){
 function normalizeOsmPlace(place,userLat,userLon){
   if(!place.name||!Number.isFinite(place.lat)||!Number.isFinite(place.lng))return null;
   const info=inferInfo(place); if(!info)return null;
-  const distanceKm=haversine(userLat,userLon,place.lat,place.lng),menu=buildMenu(info.type),bounds=menuBounds(menu);
+  const distanceKm=haversine(userLat,userLon,place.lat,place.lng);
   const tags=['OpenStreetMap 店家'];
   if(info.note)tags.push(info.note);
-  return {id:place.id,name:place.name,type:info.type,group:info.group,distanceKm:+distanceKm.toFixed(2),rating:null,open:place.openNow,address:place.address||'附近店家',tags,lat:place.lat,lon:place.lng,menu,priceMin:bounds.min,priceMax:bounds.max,menuSource:'系統估算菜單',source:'OpenStreetMap'};
+  return {id:place.id,name:place.name,type:info.type,group:info.group,distanceKm:+distanceKm.toFixed(2),rating:null,open:place.openNow,address:place.address||'附近店家',tags,lat:place.lat,lon:place.lng,menu:[],priceMin:null,priceMax:null,menuSource:'尚未收錄真實菜單',source:'OpenStreetMap'};
 }
 
 function initMap(){
@@ -186,7 +210,7 @@ function fitMapToResults(force=true){
   const bounds=points.reduce((b,p)=>b.extend(p),new maplibregl.LngLatBounds(points[0],points[0]));
   state.map.fitBounds(bounds,{padding:45,maxZoom:15,duration:force?700:0});
 }
-function budgetMatches(x){return state.budget===null||x.menu.some(item=>item.price<=state.budget);}
+function budgetMatches(x){return state.budget===null||!x.menu?.length||x.menu.some(item=>item.price<=state.budget);}
 function getFiltered(){return state.restaurants.filter(x=>(state.category==='全部'||x.group===state.category)&&budgetMatches(x)&&x.distanceKm<=state.maxDistanceKm&&!state.excluded.includes(x.type)&&(!state.openOnly||x.open!==false));}
 function makeChip(label,active,onClick,danger=false){const b=document.createElement('button');b.className=`chip${active?' active':''}${danger?' danger':''}`;b.textContent=label;b.onclick=onClick;return b;}
 function renderControls(){
@@ -199,17 +223,42 @@ function chooseRestaurant(){const f=getFiltered();if(!f.length)return showNotice
 function showNotice(m){els.notice.textContent=m;els.notice.classList.remove('hidden');els.resultCard.classList.add('hidden');}
 function hideNotice(){els.notice.classList.add('hidden');}
 function mapUrl(x){return `https://www.google.com/maps/dir/?api=1&destination=${x.lat},${x.lon}`;}
-function menuHtml(x){const rows=x.menu.map(item=>`<div class="menu-row"><span>${escapeHtml(item.name)}</span><b class="${state.budget===null||item.price<=state.budget?'within':''}">$${item.price}</b></div>`).join('');return `<div class="menu-box"><div class="menu-head"><strong>參考菜單</strong><span>${escapeHtml(x.menuSource)}</span></div>${rows}<small>非官方價格，實際價格請以店家現場為準。</small></div>`;}
+function menuHtml(x){
+  const search=state.menuSearches.get(x.id);
+  const likely=probableItemsFor(x).map(item=>`<span class="likely-item">${escapeHtml(item)}</span>`).join('');
+  let resultHtml='';
+  if(search?.loading){
+    resultHtml='<div class="menu-search-status">正在搜尋公開菜單…</div>';
+  }else if(search?.error){
+    resultHtml=`<div class="menu-search-status error">${escapeHtml(search.error)}</div>`;
+  }else if(search?.results?.length){
+    resultHtml=`<div class="menu-search-results"><strong>找到的公開來源</strong>${search.results.map(r=>`<a class="menu-source-link" href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(r.title)}</span><small>${escapeHtml(r.source||'公開網頁')}</small>${r.snippet?`<em>${escapeHtml(r.snippet)}</em>`:''}</a>`).join('')}</div>`;
+  }
+  return `<div class="menu-box"><div class="menu-head"><strong>品項資訊</strong><span>真實來源優先</span></div><div class="likely-title">依店名與類型推測可能有：</div><div class="likely-items">${likely}</div><small>以上不是官方菜單，只是幫你先判斷店家大概賣什麼。</small><button class="menu-search-button" id="menuSearchButton" type="button">🔎 自動找公開菜單</button>${resultHtml}</div>`;
+}
+async function searchPublicMenu(x){
+  state.menuSearches.set(x.id,{loading:true,results:[]});renderResult();
+  try{
+    const url=`/api/menu-search?name=${encodeURIComponent(x.name)}&address=${encodeURIComponent(x.address||'')}`;
+    const response=await fetch(url,{headers:{Accept:'application/json'}});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data.error||'菜單搜尋失敗');
+    state.menuSearches.set(x.id,{loading:false,results:data.results||[],query:data.query||''});
+  }catch(error){
+    state.menuSearches.set(x.id,{loading:false,results:[],error:error.message||'目前找不到公開菜單'});
+  }
+  renderResult();
+}
 function renderResult(){
   const x=state.restaurants.find(i=>i.id===state.selectedId);if(!x)return els.resultCard.classList.add('hidden');
-  const within=state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length;
-  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${state.budget===null?'預算不限':`${within} 項估算餐點在 $${state.budget} 內`}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'營業時間未確認'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" id="changeButton">🔄 換一家</button><button class="map-button" id="mapButton">🧭 Google 地圖</button></div>`;
-  els.resultCard.classList.remove('hidden');document.getElementById('changeButton').onclick=chooseRestaurant;document.getElementById('mapButton').onclick=()=>window.open(mapUrl(x),'_blank','noopener,noreferrer');updateSelectedMarkerClasses();
+  const within=x.menu?.length?(state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length):0;
+  els.resultCard.innerHTML=`<div class="result-eyebrow">今天就吃這間</div><div class="result-heading"><div><h2>${escapeHtml(x.name)}</h2><p>${escapeHtml(x.type)} · ${x.distanceKm} km</p></div><div class="rating">附近</div></div><div class="price-line">${x.menu?.length?(state.budget===null?'已有菜單資料':`${within} 項真實餐點在 $${state.budget} 內`):'真實價格尚未收錄'}</div><div class="meta-grid"><div>🧭 ${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘</div><div>🕒 ${x.open===true?'目前營業':x.open===false?'目前休息':'營業時間未確認'}</div></div><div class="address">${escapeHtml(x.address)}</div><div class="tag-row">${x.tags.map(t=>`<span>${escapeHtml(t)}</span>`).join('')}</div>${menuHtml(x)}<div class="action-row"><button class="secondary-button" id="changeButton">🔄 換一家</button><button class="map-button" id="mapButton">🧭 Google 地圖</button></div>`;
+  els.resultCard.classList.remove('hidden');document.getElementById('changeButton').onclick=chooseRestaurant;document.getElementById('mapButton').onclick=()=>window.open(mapUrl(x),'_blank','noopener,noreferrer');const ms=document.getElementById('menuSearchButton');if(ms)ms.onclick=()=>searchPublicMenu(x);updateSelectedMarkerClasses();
 }
 function renderList(){
   const f=getFiltered();els.nearbyCount.textContent=`${f.length} 間`;const st=state.searchStats;els.resultCount.textContent=state.isLive?`分區 ${st.successfulTiles||1}/${st.totalTiles||1} 成功 · 資料源 ${st.rawCount} 筆 → 可用 ${st.normalizedCount} 間 → 最後符合 ${f.length} 間`:'尚未取得真實店家資料';els.restaurantList.innerHTML='';
   if(!f.length)els.restaurantList.innerHTML='<div class="empty-list">目前沒有取得符合條件的真實店家。請查看上方搜尋狀態或稍後重新搜尋。</div>';
-  f.forEach(x=>{const within=state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length,b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${state.budget===null?'不限預算':`${within} 項符合預算`}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>${state.budget===null?'查看':`$${x.priceMin}+`}</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});};els.restaurantList.appendChild(b);});
+  f.forEach(x=>{const b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${x.menu?.length?'已有菜單':'可自動找菜單'}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>查看</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});};els.restaurantList.appendChild(b);});
 }
 function render(){renderControls();renderList();if(state.selectedId&&!getFiltered().some(x=>x.id===state.selectedId))state.selectedId=null;renderResult();updateMap();}
 

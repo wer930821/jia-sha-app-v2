@@ -38,7 +38,7 @@ const strongMealPattern = '豬腳|麵線|麵|飯|便當|餐盒|自助餐|食堂|
 const patterns = {
   breakfast: '早餐|早午餐|晨間|早安|美而美|美芝城|弘爺|拉亞|麥味登|Q[ _-]?Burger|漢堡大師|豆漿|蛋餅|飯糰|燒餅|油條|吐司|饅頭|蔥抓餅|三明治|brunch|breakfast',
   drink: '茶湯會|清心|五十嵐|50嵐|可不可|麻古|迷客夏|龜記|大苑子|茶飲|飲料|手搖|紅茶冰|果汁|咖啡|coffee|juice|bubble.?tea|tea',
-  dessert: '豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|雪花冰|霜淇淋|冰淇淋|甜甜圈|布丁|dessert|pastry|ice.?cream|cake',
+  dessert: '豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|挫冰|刨冰|黑砂糖冰|雪花冰|霜淇淋|冰淇淋|甜甜圈|布丁|dessert|pastry|ice.?cream|cake',
   snack: '鹽酥雞|雞排|滷味|臭豆腐|地瓜球|肉圓|蚵仔煎|甜不辣|關東煮|小吃|夜市|蔥油餅|水煎包|車輪餅|雞蛋糕|snack|street.?food',
 };
 
@@ -98,8 +98,9 @@ function classify(tags, requestedCategory) {
     return { categoryHint: requestedCategory, confidence };
   }
   if (new RegExp(patterns.breakfast, 'i').test(text) || /(breakfast|brunch|taiwanese_breakfast)/i.test(tags.cuisine || '')) return {categoryHint:'早餐',confidence:'名稱／料理判斷'};
-  if (new RegExp(patterns.drink, 'i').test(text) || tags.shop === 'beverages') return {categoryHint:'飲料',confidence:'名稱／類型判斷'};
+  // 冰品與甜點要先於飲料判斷，避免『黑砂糖挫冰』因糖／茶相關字樣被歸到飲料。
   if (new RegExp(patterns.dessert, 'i').test(text) || tags.amenity === 'ice_cream' || tags.shop === 'confectionery') return {categoryHint:'甜點',confidence:'名稱／類型判斷'};
+  if (new RegExp(patterns.drink, 'i').test(text) || tags.shop === 'beverages') return {categoryHint:'飲料',confidence:'名稱／類型判斷'};
   if (new RegExp(patterns.snack, 'i').test(text) || tags.amenity === 'fast_food') return {categoryHint:'小吃',confidence:'名稱／類型判斷'};
   if (tags.shop === 'bakery') return {categoryHint:'早餐',confidence:'麵包／輕早餐'};
   return {categoryHint:'正餐',confidence:'餐飲類型判斷'};
