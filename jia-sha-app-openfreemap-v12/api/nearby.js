@@ -33,6 +33,8 @@ function getPrimaryType(t = {}) {
   return 'restaurant';
 }
 
+const strongMealPattern = '豬腳|麵線|麵|飯|便當|餐盒|自助餐|食堂|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯|排骨|雞腿|粥|米粉|冬粉|板條|河粉|餛飩|拉麵|壽司|丼|義大利麵|披薩|漢堡|炸雞';
+
 const patterns = {
   breakfast: '早餐|早午餐|晨間|早安|美而美|美芝城|弘爺|拉亞|麥味登|Q[ _-]?Burger|漢堡大師|豆漿|蛋餅|飯糰|燒餅|油條|吐司|饅頭|蔥抓餅|三明治|brunch|breakfast',
   drink: '茶湯會|清心|五十嵐|50嵐|可不可|麻古|迷客夏|龜記|大苑子|茶飲|飲料|手搖|紅茶冰|果汁|咖啡|coffee|juice|bubble.?tea|tea',
@@ -42,8 +44,8 @@ const patterns = {
 
 function queryFor(category, radius, lat, lng) {
   const around = `(around:${radius},${lat},${lng})`;
-  const head = '[out:json][timeout:12];(';
-  const tail = ');out center tags qt 1200;';
+  const head = '[out:json][timeout:18];(';
+  const tail = ');out center tags 700;';
   if (category === '早餐') return `${head}
     nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["name"~"${patterns.breakfast}",i]${around};
     nwr["amenity"~"^(restaurant|cafe|fast_food)$"]["cuisine"~"(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)",i]${around};
@@ -80,12 +82,21 @@ function queryFor(category, radius, lat, lng) {
 }
 
 function classify(tags, requestedCategory) {
+  const text = `${tags.name || ''} ${tags.brand || ''} ${tags.cuisine || ''} ${tags.description || ''}`;
+
+  // 分類專屬搜尋仍要做交叉驗證，避免 OSM 誤標的 cafe／beverages
+  // 把豬腳麵線、便當、飯麵類店家錯塞進「飲料」。
+  if (requestedCategory === '飲料' && new RegExp(strongMealPattern, 'i').test(text)) {
+    return { categoryHint: '正餐', confidence: '餐點名稱排除飲料' };
+  }
+  if (requestedCategory === '甜點' && new RegExp('豬腳|麵線|便當|餐盒|自助餐|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯', 'i').test(text)) {
+    return { categoryHint: '正餐', confidence: '餐點名稱排除甜點' };
+  }
   if (requestedCategory !== '全部') {
     let confidence = '一般候選';
     if (requestedCategory === '早餐' && (tags.shop === 'bakery' || tags.amenity === 'cafe')) confidence = '可能有早餐';
     return { categoryHint: requestedCategory, confidence };
   }
-  const text = `${tags.name || ''} ${tags.brand || ''} ${tags.cuisine || ''} ${tags.description || ''}`;
   if (new RegExp(patterns.breakfast, 'i').test(text) || /(breakfast|brunch|taiwanese_breakfast)/i.test(tags.cuisine || '')) return {categoryHint:'早餐',confidence:'名稱／料理判斷'};
   if (new RegExp(patterns.drink, 'i').test(text) || tags.shop === 'beverages') return {categoryHint:'飲料',confidence:'名稱／類型判斷'};
   if (new RegExp(patterns.dessert, 'i').test(text) || tags.amenity === 'ice_cream' || tags.shop === 'confectionery') return {categoryHint:'甜點',confidence:'名稱／類型判斷'};
@@ -96,11 +107,11 @@ function classify(tags, requestedCategory) {
 
 async function requestOverpass(endpoint, query) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 11000);
+  const timer = setTimeout(() => controller.abort(), 19000);
   try {
     const response = await fetch(endpoint, {
       method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',Accept:'application/json','User-Agent':'JiaShaApp/1.4'},
+      headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',Accept:'application/json','User-Agent':'JiaShaApp/1.6'},
       body:new URLSearchParams({data:query}),
       signal:controller.signal
     });
@@ -121,11 +132,11 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'GET') return sendJson(res,405,{error:'只接受 GET 請求。'});
     if (!isAllowed(req)) return sendJson(res,429,{error:'搜尋太頻繁，請稍後再試。'});
     const lat=validNumber(req.query?.lat,-90,90), lng=validNumber(req.query?.lng,-180,180);
-    const radius=Math.min(20000,Math.max(300,Number(req.query?.radius)||2000));
+    const radius=Math.min(6000,Math.max(300,Number(req.query?.radius)||2000));
     const allowedCategories=['全部','早餐','正餐','小吃','飲料','甜點'];
     const category=allowedCategories.includes(String(req.query?.category)) ? String(req.query.category) : '全部';
     if (lat===null||lng===null) return sendJson(res,400,{error:'定位座標不正確。'});
-    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v14`;
+    const cacheKey=`${lat.toFixed(3)}:${lng.toFixed(3)}:${Math.round(radius/500)*500}:${category}:v15`;
     const cached=cache.get(cacheKey);
     if(cached&&Date.now()-cached.savedAt<CACHE_TTL_MS) return sendJson(res,200,cached.payload);
 

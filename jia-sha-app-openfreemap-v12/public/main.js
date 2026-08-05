@@ -37,6 +37,7 @@ const els=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
 const blacklist=/(檳榔|菸酒|煙酒|彩券|投注站|藥局|診所|醫院|寵物|汽車|機車|洗衣|美容|美髮|按摩|旅館|民宿|便利商店|超商|全家|7-?ELEVEN|萊爾富|OK超商)/i;
 const breakfastWords=/(早餐|早午餐|晨間|早安|美而美|美芝城|弘爺|拉亞|麥味登|Q\s*Burger|漢堡大師|豆漿|蛋餅|飯糰|燒餅|油條|吐司|饅頭|蔥抓餅|三明治|brunch|breakfast)/i;
 const breakfastCuisine=/(breakfast|brunch|sandwich|bagel|toast|taiwanese_breakfast)/i;
+const strongMealWords=/(豬腳|麵線|便當|餐盒|自助餐|食堂|火鍋|燒肉|牛排|咖哩|水餃|鍋貼|滷肉|雞肉飯|排骨|雞腿|粥|米粉|冬粉|板條|河粉|餛飩|拉麵|壽司|丼|義大利麵|披薩)/i;
 const drinkWords=/(茶湯會|清心|五十嵐|50嵐|可不可|麻古|迷客夏|龜記|大苑子|茶飲|飲料|手搖|紅茶冰|juice|bubble_tea|tea_shop)/i;
 const dessertWords=/(豆花|冰店|冰品|甜品|甜點|蛋糕|鬆餅|可麗餅|仙草|剉冰|雪花冰|霜淇淋|ice.?cream|dessert|pastry)/i;
 const snackWords=/(鹽酥雞|雞排|滷味|臭豆腐|地瓜球|肉圓|蚵仔煎|甜不辣|關東煮|小吃|夜市|snack)/i;
@@ -56,6 +57,8 @@ function inferInfo(place){
   const text=`${name} ${brand} ${type} ${cuisine} ${description}`;
   if(blacklist.test(text)) return null;
   if(place.categoryHint){
+    // 後端分類仍做最後一道防呆：明確飯麵主食不能進飲料。
+    if(place.categoryHint==='飲料' && strongMealWords.test(text)) return {type:noodleWords.test(text)?'麵類':'飯類',group:'正餐',note:'餐點名稱排除飲料'};
     if(place.categoryHint==='早餐') return {type:type==='bakery'?'麵包／輕早餐':'早餐',group:'早餐',note:place.classificationConfidence};
     if(place.categoryHint==='飲料') return {type:'飲料',group:'飲料',note:place.classificationConfidence};
     if(place.categoryHint==='甜點') return {type:'甜點',group:'甜點',note:place.classificationConfidence};
@@ -76,15 +79,51 @@ function inferInfo(place){
   return {type:'餐廳',group:'正餐'};
 }
 
-async function fetchOsmRestaurants(lat,lon,radiusKm){
-  const radius=Math.round(Math.min(20,Math.max(.3,radiusKm))*1000);
-  const response=await fetch(`/api/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&radius=${radius}&category=${encodeURIComponent(state.category)}`,{headers:{Accept:'application/json'}});
+async function fetchNearbyChunk(lat,lon,radiusKm){
+  const radius=Math.round(Math.min(6,Math.max(.3,radiusKm))*1000);
+  const url=`/api/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lon)}&radius=${radius}&category=${encodeURIComponent(state.category)}`;
+  const response=await fetch(url,{headers:{Accept:'application/json'}});
   const data=await response.json().catch(()=>({}));
-  if(!response.ok) throw new Error(data.error||'附近店家搜尋失敗');
-  const normalized=(data.places||[]).map(p=>normalizeOsmPlace(p,lat,lon)).filter(Boolean);
+  if(!response.ok)throw new Error(data.error||'附近店家搜尋失敗');
+  return data;
+}
+
+function searchCenters(lat,lon,radiusKm){
+  if(radiusKm<=5)return [{lat,lon,radiusKm}];
+  const tileRadius=Math.min(5.5,Math.max(3.5,radiusKm*.58));
+  const offset=Math.max(2.5,radiusKm*.52);
+  const latStep=offset/111;
+  const lonStep=offset/(111*Math.max(.25,Math.cos(lat*Math.PI/180)));
+  return [
+    {lat,lon,radiusKm:tileRadius},
+    {lat:lat+latStep,lon,radiusKm:tileRadius},
+    {lat:lat-latStep,lon,radiusKm:tileRadius},
+    {lat,lon:lon+lonStep,radiusKm:tileRadius},
+    {lat,lon:lon-lonStep,radiusKm:tileRadius}
+  ];
+}
+
+async function fetchOsmRestaurants(lat,lon,radiusKm){
+  const centers=searchCenters(lat,lon,radiusKm);
+  const settled=await Promise.allSettled(centers.map(c=>fetchNearbyChunk(c.lat,c.lon,c.radiusKm)));
+  const successful=settled.filter(x=>x.status==='fulfilled').map(x=>x.value);
+  if(!successful.length){
+    const firstError=settled.find(x=>x.status==='rejected')?.reason;
+    throw firstError||new Error('附近店家搜尋失敗');
+  }
+  const places=successful.flatMap(x=>x.places||[]);
+  const normalized=places.map(p=>normalizeOsmPlace(p,lat,lon)).filter(Boolean).filter(x=>x.distanceKm<=radiusKm);
   const unique=new Map();
-  normalized.sort((a,b)=>a.distanceKm-b.distanceKm).forEach(x=>{const key=`${x.name.toLowerCase()}-${x.lat.toFixed(4)}-${x.lon.toFixed(4)}`;if(!unique.has(key))unique.set(key,x)});
-  return {restaurants:[...unique.values()],stats:{rawCount:data.stats?.rawCount||0,returnedCount:data.stats?.returnedCount||0,normalizedCount:unique.size}};
+  normalized.sort((a,b)=>a.distanceKm-b.distanceKm).forEach(x=>{
+    const key=`${x.name.toLowerCase()}-${x.lat.toFixed(4)}-${x.lon.toFixed(4)}`;
+    if(!unique.has(key))unique.set(key,x);
+  });
+  const rawCount=successful.reduce((sum,x)=>sum+(x.stats?.rawCount||0),0);
+  const returnedCount=successful.reduce((sum,x)=>sum+(x.stats?.returnedCount||0),0);
+  return {
+    restaurants:[...unique.values()],
+    stats:{rawCount,returnedCount,normalizedCount:unique.size,successfulTiles:successful.length,totalTiles:centers.length}
+  };
 }
 function normalizeOsmPlace(place,userLat,userLon){
   if(!place.name||!Number.isFinite(place.lat)||!Number.isFinite(place.lng))return null;
@@ -168,8 +207,8 @@ function renderResult(){
   els.resultCard.classList.remove('hidden');document.getElementById('changeButton').onclick=chooseRestaurant;document.getElementById('mapButton').onclick=()=>window.open(mapUrl(x),'_blank','noopener,noreferrer');updateSelectedMarkerClasses();
 }
 function renderList(){
-  const f=getFiltered();els.nearbyCount.textContent=`${f.length} 間`;const st=state.searchStats;els.resultCount.textContent=state.isLive?`資料源 ${st.rawCount} 筆 → 可用 ${st.normalizedCount} 間 → 最後符合 ${f.length} 間`:'目前使用示範店家';els.restaurantList.innerHTML='';
-  if(!f.length)els.restaurantList.innerHTML='<div class="empty-list">沒有符合條件的店。早餐可先把距離調到 3～5 公里，再按「重新搜尋」。</div>';
+  const f=getFiltered();els.nearbyCount.textContent=`${f.length} 間`;const st=state.searchStats;els.resultCount.textContent=state.isLive?`分區 ${st.successfulTiles||1}/${st.totalTiles||1} 成功 · 資料源 ${st.rawCount} 筆 → 可用 ${st.normalizedCount} 間 → 最後符合 ${f.length} 間`:'尚未取得真實店家資料';els.restaurantList.innerHTML='';
+  if(!f.length)els.restaurantList.innerHTML='<div class="empty-list">目前沒有取得符合條件的真實店家。請查看上方搜尋狀態或稍後重新搜尋。</div>';
   f.forEach(x=>{const within=state.budget===null?x.menu.length:x.menu.filter(i=>i.price<=state.budget).length,b=document.createElement('button');b.className='restaurant-item';b.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.type)} · ${state.budget===null?'不限預算':`${within} 項符合預算`}</span><small>${transportText()}約 ${travelMinutes(x.distanceKm)} 分鐘 · ${x.distanceKm} km</small></div><b>${state.budget===null?'查看':`$${x.priceMin}+`}</b>`;b.onclick=()=>{state.selectedId=x.id;hideNotice();renderResult();els.resultCard.scrollIntoView({behavior:'smooth',block:'center'});};els.restaurantList.appendChild(b);});
 }
 function render(){renderControls();renderList();if(state.selectedId&&!getFiltered().some(x=>x.id===state.selectedId))state.selectedId=null;renderResult();updateMap();}
@@ -178,7 +217,7 @@ async function searchAtPosition(){
   if(!state.position)return useLocation();
   state.loading=true;els.locationButton.disabled=true;els.locationButton.textContent='搜尋中…';els.locationText.textContent=`搜尋 ${state.maxDistanceKm} 公里內店家`;
   try{const result=await fetchOsmRestaurants(state.position.lat,state.position.lon,state.maxDistanceKm);if(!result.restaurants.length)throw new Error('附近找不到已收錄的餐飲店家');state.restaurants=result.restaurants;state.searchStats=result.stats;state.lastFetchedRadiusKm=state.maxDistanceKm;state.isLive=true;state.selectedId=null;els.locationText.textContent=`${state.category}：找到 ${result.restaurants.length} 間候選`;hideNotice();}
-  catch(e){showNotice(`${e.message}。免費資料服務偶爾忙碌，稍後再試。`);}
+  catch(e){state.restaurants=[];state.searchStats={rawCount:0,returnedCount:0,normalizedCount:0,successfulTiles:0,totalTiles:0};state.isLive=false;state.selectedId=null;els.locationText.textContent='真實店家搜尋失敗';showNotice(`${e.message}。沒有使用示範店家，請稍後重新搜尋。`);}
   finally{state.loading=false;els.locationButton.disabled=false;els.locationButton.textContent='重新搜尋';render();}
 }
 function useLocation(){
